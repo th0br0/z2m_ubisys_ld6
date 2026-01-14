@@ -1,5 +1,7 @@
 # ubisys LD6 Zigbee2MQTT External Converter
 
+This was vibecoded with Antigravity. It works for me (I only use the CCT mode though), YMMV. :) 
+
 This external converter provides support for the **ubisys LD6** Zigbee/Bluetooth LED Controller with 6 configurable outputs.
 
 ## Features
