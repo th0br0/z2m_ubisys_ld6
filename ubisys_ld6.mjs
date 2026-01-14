@@ -91,6 +91,8 @@ const definition = {
         m.deviceAddCustomCluster('manuSpecificUbisysDeviceSetup', {
             ID: 0xfc00,
             attributes: {
+                inputConfigurations: { ID: 0x0000, type: Zcl.DataType.ARRAY, write: true },
+                inputActions: { ID: 0x0001, type: Zcl.DataType.ARRAY, write: true },
                 outputConfigurations: { ID: 0x0010, type: Zcl.DataType.ARRAY, write: true },
             },
             commands: {}, commandsResponse: {},
@@ -98,20 +100,32 @@ const definition = {
         m.deviceAddCustomCluster('lightingColorCtrl', {
             ID: Zcl.Clusters.lightingColorCtrl.ID,
             attributes: {
-                advancedOptions: { ID: 0x0000, type: Zcl.DataType.UINT8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                advancedOptions: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
         m.deviceAddCustomCluster('genLevelCtrl', {
             ID: Zcl.Clusters.genLevelCtrl.ID,
             attributes: {
-                minimumOnLevel: { ID: 0x0000, type: Zcl.DataType.UINT8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                minimumOnLevel: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
+                ballastMinLevel: { ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
+                ballastMaxLevel: { ID: 0x0002, type: Zcl.DataType.UINT8, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
         {
             fromZigbee: [
                 fzOutputConfiguration,
+                {
+                    cluster: 'manuSpecificUbisysDeviceSetup',
+                    type: ['attributeReport', 'readResponse'],
+                    convert: (model, msg, publish, options, meta) => {
+                        const result = {};
+                        if (msg.data.inputConfigurations !== undefined) result.input_configurations = msg.data.inputConfigurations.map(b => b[0]);
+                        if (msg.data.inputActions !== undefined) result.input_actions = msg.data.inputActions.map(b => b.toString('hex'));
+                        return result;
+                    },
+                },
                 {
                     cluster: 'lightingColorCtrl',
                     type: ['attributeReport', 'readResponse'],
@@ -122,6 +136,8 @@ const definition = {
                                 advanced_options_no_color_white: (val & 0x01) > 0,
                                 advanced_options_no_first_white_color: (val & 0x02) > 0,
                                 advanced_options_no_second_white_color: (val & 0x04) > 0,
+                                advanced_options_ignore_color_temp_range: (val & 0x08) > 0,
+                                advanced_options_constant_luminous_flux: (val & 0x10) > 0,
                             };
                         }
                     },
@@ -130,32 +146,113 @@ const definition = {
                     cluster: 'genLevelCtrl',
                     type: ['attributeReport', 'readResponse'],
                     convert: (model, msg, publish, options, meta) => {
-                        if (msg.data.minimumOnLevel !== undefined) return { minimum_on_level: msg.data.minimumOnLevel };
+                        const result = {};
+                        if (msg.data.minimumOnLevel !== undefined) result.minimum_on_level = msg.data.minimumOnLevel;
+                        if (msg.data.ballastMinLevel !== undefined) result.ballast_min_level = msg.data.ballastMinLevel;
+                        if (msg.data.ballastMaxLevel !== undefined) result.ballast_max_level = msg.data.ballastMaxLevel;
+                        return result;
                     },
                 }
             ],
             toZigbee: [
                 tzOutputConfiguration,
                 {
-                    key: ['advanced_options_no_color_white', 'advanced_options_no_first_white_color', 'advanced_options_no_second_white_color'],
+                    key: ['output_configuration'],
+                    convertSet: async (entity, key, value, meta) => {
+                        const payload = Buffer.from(value, 'hex');
+                        const data = [];
+                        let offset = 4;
+                        while (offset < payload.length) {
+                            const len = payload[offset];
+                            data.push(payload.slice(offset + 1, offset + 1 + len));
+                            offset += len + 1;
+                        }
+                        const endpoint = meta.device.getEndpoint(232);
+                        await endpoint.writeStructured('manuSpecificUbisysDeviceSetup', [{
+                            attrId: 0x0010, selector: {}, dataType: Zcl.DataType.ARRAY,
+                            elementData: { elementType: Zcl.DataType.OCTET_STR, elements: data }
+                        }]);
+                        return { state: { output_configuration_raw: value } };
+                    },
+                    convertGet: async (entity, key, meta) => {
+                        await entity.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']);
+                    },
+                },
+                {
+                    key: ['input_configurations'],
+                    convertSet: async (entity, key, value, meta) => {
+                        const endpoint = meta.device.getEndpoint(232);
+                        const data = value.map(val => Buffer.from([val]));
+                        await endpoint.writeStructured('manuSpecificUbisysDeviceSetup', [{
+                            attrId: 0x0000, selector: {}, dataType: Zcl.DataType.ARRAY,
+                            elementData: { elementType: Zcl.DataType.OCTET_STR, elements: data }
+                        }]);
+                        return { state: { input_configurations: value } };
+                    },
+                    convertGet: async (entity, key, meta) => {
+                        await entity.read('manuSpecificUbisysDeviceSetup', ['inputConfigurations']);
+                    },
+                },
+                {
+                    key: ['input_actions'],
+                    convertSet: async (entity, key, value, meta) => {
+                        const endpoint = meta.device.getEndpoint(232);
+                        const data = value.map(val => Buffer.from(val, 'hex'));
+                        await endpoint.writeStructured('manuSpecificUbisysDeviceSetup', [{
+                            attrId: 0x0001, selector: {}, dataType: Zcl.DataType.ARRAY,
+                            elementData: { elementType: Zcl.DataType.OCTET_STR, elements: data }
+                        }]);
+                        return { state: { input_actions: value } };
+                    },
+                    convertGet: async (entity, key, meta) => {
+                        await entity.read('manuSpecificUbisysDeviceSetup', ['inputActions']);
+                    },
+                },
+                {
+                    key: ['advanced_options_no_color_white', 'advanced_options_no_first_white_color', 'advanced_options_no_second_white_color',
+                        'advanced_options_ignore_color_temp_range', 'advanced_options_constant_luminous_flux'],
                     convertSet: async (entity, key, value, meta) => {
                         const state = meta.state;
                         const noColorWhite = key === 'advanced_options_no_color_white' ? value : (state.advanced_options_no_color_white || false);
                         const noFirstWhiteColor = key === 'advanced_options_no_first_white_color' ? value : (state.advanced_options_no_first_white_color || false);
                         const noSecondWhiteColor = key === 'advanced_options_no_second_white_color' ? value : (state.advanced_options_no_second_white_color || false);
+                        const ignoreRange = key === 'advanced_options_ignore_color_temp_range' ? value : (state.advanced_options_ignore_color_temp_range || false);
+                        const constantFlux = key === 'advanced_options_constant_luminous_flux' ? value : (state.advanced_options_constant_luminous_flux || false);
                         let val = 0;
                         if (noColorWhite) val |= 0x01;
                         if (noFirstWhiteColor) val |= 0x02;
                         if (noSecondWhiteColor) val |= 0x04;
+                        if (ignoreRange) val |= 0x08;
+                        if (constantFlux) val |= 0x10;
                         await entity.write('lightingColorCtrl', { advancedOptions: val }, { manufacturerCode: UBISYS_MANUFACTURER_CODE });
                         return { state: { [key]: value } };
                     },
+                    convertGet: async (entity, key, meta) => {
+                        await entity.read('lightingColorCtrl', ['advancedOptions'], { manufacturerCode: UBISYS_MANUFACTURER_CODE });
+                    },
                 },
                 {
-                    key: ['minimum_on_level'],
+                    key: ['minimum_on_level', 'ballast_min_level', 'ballast_max_level'],
                     convertSet: async (entity, key, value, meta) => {
-                        await entity.write('genLevelCtrl', { minimumOnLevel: value }, { manufacturerCode: UBISYS_MANUFACTURER_CODE });
-                        return { state: { minimum_on_level: value } };
+                        let attr, opts = {};
+                        if (key === 'minimum_on_level') {
+                            attr = 'minimumOnLevel';
+                            opts.manufacturerCode = UBISYS_MANUFACTURER_CODE;
+                        } else {
+                            attr = key === 'ballast_min_level' ? 'ballastMinLevel' : 'ballastMaxLevel';
+                        }
+                        await entity.write('genLevelCtrl', { [attr]: value }, opts);
+                        return { state: { [key]: value } };
+                    },
+                    convertGet: async (entity, key, meta) => {
+                        let attr, opts = {};
+                        if (key === 'minimum_on_level') {
+                            attr = 'minimumOnLevel';
+                            opts.manufacturerCode = UBISYS_MANUFACTURER_CODE;
+                        } else {
+                            attr = key === 'ballast_min_level' ? 'ballastMinLevel' : 'ballastMaxLevel';
+                        }
+                        await entity.read('genLevelCtrl', [attr], opts);
                     },
                 },
                 {
@@ -222,11 +319,18 @@ const definition = {
     exposes: (device, options) => {
         const exposesList = [];
         exposesList.push(e.enum('output_mode', ea.SET, Object.keys(OUTPUT_CONFIGURATIONS)));
+        exposesList.push(e.text('output_configuration', ea.SET));
         exposesList.push(e.text('output_configuration_raw', ea.STATE));
+        exposesList.push(e.numeric('ballast_min_level', ea.ALL).withValueMin(1).withValueMax(254));
+        exposesList.push(e.numeric('ballast_max_level', ea.ALL).withValueMin(1).withValueMax(254));
         exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false));
         exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false));
         exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false));
+        exposesList.push(e.binary('advanced_options_ignore_color_temp_range', ea.ALL, true, false));
+        exposesList.push(e.binary('advanced_options_constant_luminous_flux', ea.ALL, true, false));
         exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
+        exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
+        exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
         exposesList.push(e.text('calibration', ea.SET));
         exposesList.push(e.text('calibration_status', ea.STATE));
 

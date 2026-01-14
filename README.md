@@ -6,6 +6,7 @@ This external converter provides support for the **ubisys LD6** Zigbee/Bluetooth
 
 - Full independent control for up to 6 lights (depending on mode)
 - On/Off, Brightness, Color Temperature (CCT), and Color (xy/hs)
+- **Dynamic UI**: Features like Color X/Y or Color Temperature are automatically shown/hidden based on the device's current cluster configuration.
 - **Output configuration mode selection** - Choose from 15+ predefined modes
 - **Advanced color mixing options** - Fine-tune how white and color LEDs interact
 - **Dimming limits** - Set minimum and maximum brightness levels (ballast config)
@@ -126,6 +127,8 @@ The LD6 allows fine-tuning of how color and white primaries are mixed. These are
 
 - **Don't use color for white**: White tones in CCT mode will only be composed of white LEDs (requires 2 white primaries).
 - **Don't use first/second white for color**: Prevents specific white LEDs from contributing to colored light ( CIE 1931 xy or hue/saturation mode).
+- **Constant Luminous Flux**: Maintains constant brightness when shifting color temperature.
+- **Ignore Color Temperature Range**: Allows setting any color temperature even if it falls outside the calibrated physical range.
 
 ## Dimming Limits (`Ballast Configuration`)
 
@@ -219,6 +222,8 @@ See the ubisys LD6 Technical Reference Manual for the full configuration format.
 | `advanced_options_no_color_white` | Read/Write | Don't use color for white tones |
 | `advanced_options_no_first_white_color` | Read/Write | Don't use first white for color |
 | `advanced_options_no_second_white_color` | Read/Write | Don't use second white for color |
+| `advanced_options_ignore_color_temp_range` | Read/Write | Ignore CCT limits |
+| `advanced_options_constant_luminous_flux` | Read/Write | Constant brightness across CCT |
 | `ballast_min_level` | Read/Write | Minimum light level (1-254) |
 | `ballast_max_level` | Read/Write | Maximum light level (1-254) |
 
