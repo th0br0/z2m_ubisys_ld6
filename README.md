@@ -46,6 +46,7 @@ The LD6 has 6 PWM output channels that can be configured in various ways:
 | `2x_dimmable` | 2x Dimmable (mono) | EP1, EP5 |
 | `2x_cct` | 2x CCT / Tunable White | EP1, EP5 |
 | `1x_rgb_1x_cct` | 1x RGB + 1x CCT | EP1, EP5 |
+| `1x_cct_1x_rgb` | 1x CCT + 1x RGB | EP1, EP5 |
 | `1x_rgbw_1x_cct` | 1x RGBW + 1x CCT | EP1, EP5 |
 | `2x_rgb` | 2x RGB Color | EP1, EP5 |
 
