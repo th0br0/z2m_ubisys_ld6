@@ -56,6 +56,12 @@ const tzOutputConfiguration = {
     },
 };
 
+function xyToMireds(x, y) {
+    const n = (x - 0.3320) / (0.1858 - y);
+    const cct = 449 * Math.pow(n, 3) + 3525 * Math.pow(n, 2) + 6823.3 * n + 5520.33;
+    return Math.round(1000000 / cct);
+}
+
 const definition = {
     zigbeeModel: ['LD6'],
     model: 'LD6',
@@ -225,16 +231,54 @@ const definition = {
         exposesList.push(e.text('calibration_status', ea.STATE));
 
         if (device && typeof device.getEndpoint === 'function') {
+            const setupEp = device.getEndpoint(232);
+            const outputConfigs = setupEp?.getClusterAttributeValue('manuSpecificUbisysDeviceSetup', 'outputConfigurations');
+
             [1, 5, 6, 7, 8, 9].forEach(epNum => {
                 const ep = device.getEndpoint(epNum);
                 if (ep) {
                     const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
-                    const hasColor = ep.supportsInputCluster('lightingColorCtrl');
-                    const hasLevel = ep.supportsInputCluster('genLevelCtrl');
-                    if (hasColor) {
-                        exposesList.push(e.light_brightness_colortemp_colorxy([153, 555]).withEndpoint(name));
-                    } else if (hasLevel) {
+                    const colorCapabilities = ep.getClusterAttributeValue('lightingColorCtrl', 'colorCapabilities');
+
+                    // Check for specific cluster/attribute support
+                    const hasColorTemp = (colorCapabilities !== undefined) ? (colorCapabilities & 0x10) : (ep.getClusterAttributeValue('lightingColorCtrl', 'colorTemperature') !== undefined);
+                    const hasColorXY = (colorCapabilities !== undefined) ? (colorCapabilities & 0x08) : (ep.getClusterAttributeValue('lightingColorCtrl', 'currentX') !== undefined);
+                    const hasBrightness = ep.supportsInputCluster('genLevelCtrl');
+                    const hasOnOff = ep.supportsInputCluster('genOnOff');
+
+                    if (hasColorTemp) {
+                        let range = [153, 500]; // Default
+                        if (outputConfigs) {
+                            let cwMireds, wwMireds;
+                            outputConfigs.forEach((buf) => {
+                                const el = Buffer.from(buf);
+                                const epFunc = el[0];
+                                const channelEp = (epFunc >> 4) & 0x0F;
+                                const func = epFunc & 0x0F;
+                                if (channelEp === epNum) {
+                                    const x = (el[2] | (el[3] << 8)) / 65536;
+                                    const y = (el[4] | (el[5] << 8)) / 65536;
+                                    const mireds = xyToMireds(x, y);
+                                    if (func === 1) cwMireds = mireds; // Cold White
+                                    if (func === 2) wwMireds = mireds; // Warm White
+                                }
+                            });
+                            if (cwMireds && wwMireds) {
+                                range = [Math.min(cwMireds, wwMireds), Math.max(cwMireds, wwMireds)];
+                            }
+                        }
+
+                        if (hasColorXY) {
+                            exposesList.push(e.light_brightness_colortemp_colorxy(range).withEndpoint(name));
+                        } else {
+                            exposesList.push(e.light_brightness_colortemp(range).withEndpoint(name));
+                        }
+                    } else if (hasColorXY) {
+                        exposesList.push(e.light_brightness_colorxy().withEndpoint(name));
+                    } else if (hasBrightness) {
                         exposesList.push(e.light_brightness().withEndpoint(name));
+                    } else if (hasOnOff) {
+                        exposesList.push(e.light_onoff().withEndpoint(name));
                     }
                 }
             });
@@ -244,7 +288,7 @@ const definition = {
     configure: async (device, coordinatorEndpoint, definition) => {
         const setupEp = device.getEndpoint(232);
         if (setupEp) {
-            try { await setupEp.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']); } catch (e) { }
+            try { await setupEp.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']); } catch (e) { /* Do nothing if read fails */ }
         }
     },
     ota: true,
