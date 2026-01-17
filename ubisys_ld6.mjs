@@ -56,6 +56,15 @@ const tzOutputConfiguration = {
 
         // Write all 6 output slots to the device at once
         await writeSetupAttribute(meta.device, 0x0010, config.data);
+
+        // Read back the configuration so 'exposes' can update immediately
+        try {
+            await getSetupEndpoint(meta.device).read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']);
+        } catch (e) {
+            // Ignore but log.
+            console.error(e);
+        }
+
         return { state: { output_mode: value } };
     },
 };
@@ -386,36 +395,48 @@ const definition = {
                     const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
                     const colorCapabilities = ep.getClusterAttributeValue('lightingColorCtrl', 'colorCapabilities');
 
-                    // 1. Determine capabilities (Color Temp vs Color XY)
-                    const hasColorTemp = (colorCapabilities !== undefined) ? (colorCapabilities & 0x10) : (ep.getClusterAttributeValue('lightingColorCtrl', 'colorTemperature') !== undefined);
-                    const hasColorXY = (colorCapabilities !== undefined) ? (colorCapabilities & 0x08) : (ep.getClusterAttributeValue('lightingColorCtrl', 'currentX') !== undefined);
-                    const hasBrightness = ep.supportsInputCluster('genLevelCtrl');
-                    const hasOnOff = ep.supportsInputCluster('genOnOff');
+                    // 1. Determine capabilities from Output Configuration (if available)
+                    // This is more reliable than waiting for attributes to be read, as we know exactly how we configured the device.
+                    let configHasColorTemp = false;
+                    let configHasColorXY = false;
+                    let cwMireds, wwMireds;
 
-                    // 2. Calculate dynamic CCT range from calibration data if available
-                    if (hasColorTemp) {
-                        let range = [153, 500]; // Default CCT range
-                        if (outputConfigs) {
-                            let cwMireds, wwMireds;
-                            outputConfigs.forEach((buf) => {
-                                const el = Buffer.from(buf);
-                                const epFunc = el[0];
-                                const channelEp = (epFunc >> 4) & 0x0F;
-                                const func = epFunc & 0x0F;
-                                if (channelEp === epNum) {
+                    if (outputConfigs) {
+                        outputConfigs.forEach((buf) => {
+                            const el = Buffer.from(buf);
+                            const epFunc = el[0];
+                            const channelEp = (epFunc >> 4) & 0x0F;
+                            const func = epFunc & 0x0F;
+                            if (channelEp === epNum) {
+                                // Determine capabilities based on function
+                                if (func === 1 || func === 2) configHasColorTemp = true; // CW or WW
+                                if (func >= 3 && func <= 9) configHasColorXY = true;     // Color channels
+
+                                // Collect calibration data for range calculation
+                                if (func === 1 || func === 2) {
                                     const x = (el[2] | (el[3] << 8)) / 65536;
                                     const y = (el[4] | (el[5] << 8)) / 65536;
                                     const mireds = xyToMireds(x, y);
-                                    if (func === 1) cwMireds = mireds; // Cold White channel
-                                    if (func === 2) wwMireds = mireds; // Warm White channel
+                                    if (func === 1) cwMireds = mireds;
+                                    if (func === 2) wwMireds = mireds;
                                 }
-                            });
-                            if (cwMireds && wwMireds) {
-                                range = [Math.min(cwMireds, wwMireds), Math.max(cwMireds, wwMireds)];
                             }
+                        });
+                    }
+
+                    // 2. Decide exposed features (Priority: Explicit Capability > Configured Mode > Attribute Presence)
+                    const hasColorTemp = (colorCapabilities !== undefined) ? (colorCapabilities & 0x10) : (configHasColorTemp || (ep.getClusterAttributeValue('lightingColorCtrl', 'colorTemperature') !== undefined));
+                    const hasColorXY = (colorCapabilities !== undefined) ? (colorCapabilities & 0x08) : (configHasColorXY || (ep.getClusterAttributeValue('lightingColorCtrl', 'currentX') !== undefined));
+                    const hasBrightness = ep.supportsInputCluster('genLevelCtrl');
+                    const hasOnOff = ep.supportsInputCluster('genOnOff');
+
+                    // 3. Expose provisions
+                    if (hasColorTemp) {
+                        let range = [153, 500]; // Default CCT range
+                        if (cwMireds && wwMireds) {
+                            range = [Math.min(cwMireds, wwMireds), Math.max(cwMireds, wwMireds)];
                         }
 
-                        // 3. Expose the appropriate light type
                         if (hasColorXY) {
                             exposesList.push(e.light_brightness_colortemp_colorxy(range).withEndpoint(name));
                         } else {
@@ -442,6 +463,23 @@ const definition = {
              * before the user makes any changes.
              */
             try { await setupEp.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']); } catch (e) { /* Do nothing if read fails */ }
+        }
+
+        // Proactively read color capabilities for all potential endpoints to ensure UI is correct
+        for (const epNum of [1, 5, 6, 7, 8, 9]) {
+            const ep = device.getEndpoint(epNum);
+            if (ep) {
+                try {
+                    // Start with basic on/off/level
+                    await ep.read('genOnOff', ['onOff']);
+                    await ep.read('genLevelCtrl', ['currentLevel']);
+
+                    // Check color capabilities if cluster exists
+                    if (ep.supportsInputCluster('lightingColorCtrl')) {
+                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'minMireds', 'maxMireds']);
+                    }
+                } catch (e) { /* ignore */ }
+            }
         }
     },
     ota: true,
