@@ -172,6 +172,7 @@ const definition = {
                 minimumOnLevel: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
                 ballastMinLevel: { ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
                 ballastMaxLevel: { ID: 0x0002, type: Zcl.DataType.UINT8, write: true },
+                onOffTransitionTime: { ID: 0x0010, type: Zcl.DataType.UINT16, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
@@ -212,6 +213,7 @@ const definition = {
                         if (msg.data.minimumOnLevel !== undefined) result.minimum_on_level = msg.data.minimumOnLevel;
                         if (msg.data.ballastMinLevel !== undefined) result.ballast_min_level = msg.data.ballastMinLevel;
                         if (msg.data.ballastMaxLevel !== undefined) result.ballast_max_level = msg.data.ballastMaxLevel;
+                        if (msg.data.onOffTransitionTime !== undefined) result.on_off_transition_time = msg.data.onOffTransitionTime;
                         return result;
                     },
                 }
@@ -282,12 +284,14 @@ const definition = {
                     },
                 },
                 {
-                    key: ['minimum_on_level', 'ballast_min_level', 'ballast_max_level'],
+                    key: ['minimum_on_level', 'ballast_min_level', 'ballast_max_level', 'on_off_transition_time'],
                     convertSet: async (entity, key, value, meta) => {
                         let attr, opts = {};
                         if (key === 'minimum_on_level') {
                             attr = 'minimumOnLevel';
                             opts.manufacturerCode = UBISYS_MANUFACTURER_CODE;
+                        } else if (key === 'on_off_transition_time') {
+                            attr = 'onOffTransitionTime';
                         } else {
                             attr = key === 'ballast_min_level' ? 'ballastMinLevel' : 'ballastMaxLevel';
                         }
@@ -299,6 +303,8 @@ const definition = {
                         if (key === 'minimum_on_level') {
                             attr = 'minimumOnLevel';
                             opts.manufacturerCode = UBISYS_MANUFACTURER_CODE;
+                        } else if (key === 'on_off_transition_time') {
+                            attr = 'onOffTransitionTime';
                         } else {
                             attr = key === 'ballast_min_level' ? 'ballastMinLevel' : 'ballastMaxLevel';
                         }
@@ -367,6 +373,7 @@ const definition = {
         exposesList.push(e.text('output_configuration_raw', ea.STATE));
         exposesList.push(e.numeric('ballast_min_level', ea.ALL).withValueMin(1).withValueMax(254));
         exposesList.push(e.numeric('ballast_max_level', ea.ALL).withValueMin(1).withValueMax(254));
+        // on_off_transition_time moved to per-endpoint loop
         exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false));
         exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false));
         exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false));
@@ -449,6 +456,9 @@ const definition = {
                     } else if (hasOnOff) {
                         exposesList.push(e.light_onoff().withEndpoint(name));
                     }
+
+                    // Expose transition time for this endpoint
+                    exposesList.push(e.numeric('on_off_transition_time', ea.ALL).withUnit('0.1s').withValueMin(0).withValueMax(65535).withEndpoint(name));
                 }
             });
         }
