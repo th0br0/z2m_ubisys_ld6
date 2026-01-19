@@ -508,7 +508,7 @@ const definition = {
              * This allows 'exposes' to correctly calculate CCT ranges even 
              * before the user makes any changes.
              */
-            try { await setupEp.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']); } catch (e) { /* Do nothing if read fails */ }
+            try { await setupEp.read('manuSpecificUbisysDeviceSetup', ['outputConfigurations']); } catch (e) { console.warn(`ubisys LD6: Failed to read outputConfigurations: ${e.message}`); }
         }
 
         // Proactively read color capabilities for all potential endpoints to ensure UI is correct
@@ -528,7 +528,7 @@ const definition = {
                         await ep.read('ballastCfg', ['physicalMinLevel', 'physicalMaxLevel']);
                     }
                     await ep.read('genLevelCtrl', ['startUpCurrentLevel', 'options']);
-                } catch (e) { /* ignore */ }
+                } catch (e) { console.warn(`ubisys LD6: Failed to configure endpoint ${epNum}: ${e.message}`); }
             }
         }
     },
