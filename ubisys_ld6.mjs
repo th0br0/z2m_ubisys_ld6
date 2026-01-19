@@ -486,7 +486,7 @@ const definition = {
 
                     // Check color capabilities if cluster exists
                     if (ep.supportsInputCluster('lightingColorCtrl')) {
-                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'minMireds', 'maxMireds']);
+                        await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMinMireds', 'colorTempPhysicalMaxMireds']);
                     }
                 } catch (e) { /* ignore */ }
             }
