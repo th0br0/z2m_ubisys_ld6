@@ -159,6 +159,14 @@ const definition = {
             },
             commands: {}, commandsResponse: {},
         }),
+        m.deviceAddCustomCluster('ballastCfg', {
+            ID: Zcl.Clusters.ballastCfg.ID,
+            attributes: {
+                physicalMinLevel: { ID: 0x0000, type: Zcl.DataType.UINT8, write: true },
+                physicalMaxLevel: { ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
+            },
+            commands: {}, commandsResponse: {},
+        }),
         m.deviceAddCustomCluster('lightingColorCtrl', {
             ID: Zcl.Clusters.lightingColorCtrl.ID,
             attributes: {
@@ -170,9 +178,9 @@ const definition = {
             ID: Zcl.Clusters.genLevelCtrl.ID,
             attributes: {
                 minimumOnLevel: { ID: 0x0000, type: Zcl.DataType.BITMAP8, manufacturerCode: UBISYS_MANUFACTURER_CODE, write: true },
-                ballastMinLevel: { ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
-                ballastMaxLevel: { ID: 0x0002, type: Zcl.DataType.UINT8, write: true },
+                options: { ID: 0x000f, type: Zcl.DataType.BITMAP8, write: true },
                 onOffTransitionTime: { ID: 0x0010, type: Zcl.DataType.UINT16, write: true },
+                startUpCurrentLevel: { ID: 0x4000, type: Zcl.DataType.UINT8, write: true },
             },
             commands: {}, commandsResponse: {},
         }),
@@ -211,12 +219,22 @@ const definition = {
                     convert: (model, msg, publish, options, meta) => {
                         const result = {};
                         if (msg.data.minimumOnLevel !== undefined) result.minimum_on_level = msg.data.minimumOnLevel;
-                        if (msg.data.ballastMinLevel !== undefined) result.ballast_min_level = msg.data.ballastMinLevel;
-                        if (msg.data.ballastMaxLevel !== undefined) result.ballast_max_level = msg.data.ballastMaxLevel;
+                        if (msg.data.options !== undefined) result.execute_if_off = !!(msg.data.options & 1);
                         if (msg.data.onOffTransitionTime !== undefined) result.on_off_transition_time = msg.data.onOffTransitionTime;
+                        if (msg.data.startUpCurrentLevel !== undefined) result.startup_level = msg.data.startUpCurrentLevel;
                         return result;
                     },
-                }
+                },
+                {
+                    cluster: 'ballastCfg',
+                    type: ['attributeReport', 'readResponse'],
+                    convert: (model, msg, publish, options, meta) => {
+                        const result = {};
+                        if (msg.data.physicalMinLevel !== undefined) result.ballast_min_level = msg.data.physicalMinLevel;
+                        if (msg.data.physicalMaxLevel !== undefined) result.ballast_max_level = msg.data.physicalMaxLevel;
+                        return result;
+                    },
+                },
             ],
             toZigbee: [
                 tzOutputConfiguration,
@@ -284,31 +302,47 @@ const definition = {
                     },
                 },
                 {
-                    key: ['minimum_on_level', 'ballast_min_level', 'ballast_max_level', 'on_off_transition_time'],
+                    key: ['minimum_on_level', 'on_off_transition_time', 'startup_level', 'execute_if_off'],
                     convertSet: async (entity, key, value, meta) => {
-                        let attr, opts = {};
                         if (key === 'minimum_on_level') {
-                            attr = 'minimumOnLevel';
-                            opts.manufacturerCode = UBISYS_MANUFACTURER_CODE;
+                            await entity.write('genLevelCtrl', { minimumOnLevel: value }, { manufacturerCode: UBISYS_MANUFACTURER_CODE });
                         } else if (key === 'on_off_transition_time') {
-                            attr = 'onOffTransitionTime';
-                        } else {
-                            attr = key === 'ballast_min_level' ? 'ballastMinLevel' : 'ballastMaxLevel';
+                            await entity.write('genLevelCtrl', { onOffTransitionTime: value });
+                        } else if (key === 'startup_level') {
+                            await entity.write('genLevelCtrl', { startUpCurrentLevel: value });
+                        } else if (key === 'execute_if_off') {
+                            await entity.write('genLevelCtrl', { options: value ? 1 : 0 });
                         }
-                        await entity.write('genLevelCtrl', { [attr]: value }, opts);
                         return { state: { [key]: value } };
                     },
                     convertGet: async (entity, key, meta) => {
-                        let attr, opts = {};
                         if (key === 'minimum_on_level') {
-                            attr = 'minimumOnLevel';
-                            opts.manufacturerCode = UBISYS_MANUFACTURER_CODE;
+                            await entity.read('genLevelCtrl', ['minimumOnLevel'], { manufacturerCode: UBISYS_MANUFACTURER_CODE });
                         } else if (key === 'on_off_transition_time') {
-                            attr = 'onOffTransitionTime';
-                        } else {
-                            attr = key === 'ballast_min_level' ? 'ballastMinLevel' : 'ballastMaxLevel';
+                            await entity.read('genLevelCtrl', ['onOffTransitionTime']);
+                        } else if (key === 'startup_level') {
+                            await entity.read('genLevelCtrl', ['startUpCurrentLevel']);
+                        } else if (key === 'execute_if_off') {
+                            await entity.read('genLevelCtrl', ['options']);
                         }
-                        await entity.read('genLevelCtrl', [attr], opts);
+                    },
+                },
+                {
+                    key: ['ballast_min_level', 'ballast_max_level'],
+                    convertSet: async (entity, key, value, meta) => {
+                        if (key === 'ballast_min_level') {
+                            await entity.write('ballastCfg', { physicalMinLevel: value });
+                        } else if (key === 'ballast_max_level') {
+                            await entity.write('ballastCfg', { physicalMaxLevel: value });
+                        }
+                        return { state: { [key]: value } };
+                    },
+                    convertGet: async (entity, key, meta) => {
+                        if (key === 'ballast_min_level') {
+                            await entity.read('ballastCfg', ['physicalMinLevel']);
+                        } else if (key === 'ballast_max_level') {
+                            await entity.read('ballastCfg', ['physicalMaxLevel']);
+                        }
                     },
                 },
                 {
@@ -457,8 +491,10 @@ const definition = {
                         exposesList.push(e.light_onoff().withEndpoint(name));
                     }
 
-                    // Expose transition time for this endpoint
+                    // Expose transition time and startup level for this endpoint
                     exposesList.push(e.numeric('on_off_transition_time', ea.ALL).withUnit('0.1s').withValueMin(0).withValueMax(65535).withEndpoint(name));
+                    exposesList.push(e.numeric('startup_level', ea.ALL).withValueMin(0).withValueMax(254).withEndpoint(name));
+                    exposesList.push(e.binary('execute_if_off', ea.ALL, true, false).withEndpoint(name));
                 }
             });
         }
@@ -488,6 +524,10 @@ const definition = {
                     if (ep.supportsInputCluster('lightingColorCtrl')) {
                         await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMinMireds', 'colorTempPhysicalMaxMireds']);
                     }
+                    if (ep.supportsInputCluster('ballastCfg')) {
+                        await ep.read('ballastCfg', ['physicalMinLevel', 'physicalMaxLevel']);
+                    }
+                    await ep.read('genLevelCtrl', ['startUpCurrentLevel', 'options']);
                 } catch (e) { /* ignore */ }
             }
         }
