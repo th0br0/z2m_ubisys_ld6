@@ -9,9 +9,10 @@
 import * as m from 'zigbee-herdsman-converters/lib/modernExtend';
 import * as exposes from 'zigbee-herdsman-converters/lib/exposes';
 import { Zcl } from 'zigbee-herdsman';
+import { Buffer } from 'buffer';
 
-const e = exposes.presets;
-const ea = exposes.access;
+const e = exposes.presets || (exposes.default && exposes.default.presets) || exposes;
+const ea = exposes.access || (exposes.default && exposes.default.access);
 
 const UBISYS_MANUFACTURER_CODE = Zcl.ManufacturerCode.UBISYS_TECHNOLOGIES_GMBH;
 
@@ -159,8 +160,8 @@ const definition = {
             },
             commands: {}, commandsResponse: {},
         }),
-        m.deviceAddCustomCluster('ballastCfg', {
-            ID: Zcl.Clusters.ballastCfg.ID,
+        m.deviceAddCustomCluster('lightingBallastCfg', {
+            ID: Zcl.Clusters.lightingBallastCfg.ID,
             attributes: {
                 physicalMinLevel: { ID: 0x0000, type: Zcl.DataType.UINT8, write: true },
                 physicalMaxLevel: { ID: 0x0001, type: Zcl.DataType.UINT8, write: true },
@@ -226,7 +227,7 @@ const definition = {
                     },
                 },
                 {
-                    cluster: 'ballastCfg',
+                    cluster: 'lightingBallastCfg',
                     type: ['attributeReport', 'readResponse'],
                     convert: (model, msg, publish, options, meta) => {
                         const result = {};
@@ -331,17 +332,17 @@ const definition = {
                     key: ['ballast_min_level', 'ballast_max_level'],
                     convertSet: async (entity, key, value, meta) => {
                         if (key === 'ballast_min_level') {
-                            await entity.write('ballastCfg', { physicalMinLevel: value });
+                            await entity.write('lightingBallastCfg', { physicalMinLevel: value });
                         } else if (key === 'ballast_max_level') {
-                            await entity.write('ballastCfg', { physicalMaxLevel: value });
+                            await entity.write('lightingBallastCfg', { physicalMaxLevel: value });
                         }
                         return { state: { [key]: value } };
                     },
                     convertGet: async (entity, key, meta) => {
                         if (key === 'ballast_min_level') {
-                            await entity.read('ballastCfg', ['physicalMinLevel']);
+                            await entity.read('lightingBallastCfg', ['physicalMinLevel']);
                         } else if (key === 'ballast_max_level') {
-                            await entity.read('ballastCfg', ['physicalMaxLevel']);
+                            await entity.read('lightingBallastCfg', ['physicalMaxLevel']);
                         }
                     },
                 },
@@ -400,103 +401,132 @@ const definition = {
         }
     ],
     exposes: (device, options) => {
-        const exposesList = [];
-        // Global device settings
-        exposesList.push(e.enum('output_mode', ea.SET, Object.keys(OUTPUT_CONFIGURATIONS)));
-        exposesList.push(e.text('output_configuration', ea.SET));
-        exposesList.push(e.text('output_configuration_raw', ea.STATE));
-        exposesList.push(e.numeric('ballast_min_level', ea.ALL).withValueMin(1).withValueMax(254));
-        exposesList.push(e.numeric('ballast_max_level', ea.ALL).withValueMin(1).withValueMax(254));
-        // on_off_transition_time moved to per-endpoint loop
-        exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false));
-        exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false));
-        exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false));
-        exposesList.push(e.binary('advanced_options_ignore_color_temp_range', ea.ALL, true, false));
-        exposesList.push(e.binary('advanced_options_constant_luminous_flux', ea.ALL, true, false));
-        exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
-        exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
-        exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
-        exposesList.push(e.text('calibration', ea.SET));
-        exposesList.push(e.text('calibration_status', ea.STATE));
+        let exposesList = [];
+        try {
+            // Validate presets availability
+            if (!e || !ea) {
+                console.error('ubisys_ld6: Exposes presets not found. Library import failed?');
+                return [];
+            }
 
-        /**
-         * Dynamic Feature Probing
-         * The LD6 can be anything from 6 dimmers to 1 RGBWW + 1 CCT. 
-         * We check the actual clusters and attributes on each endpoint to 
-         * decide which controls to show in the UI.
-         */
-        if (device && typeof device.getEndpoint === 'function') {
-            const setupEp = device.getEndpoint(232);
-            // Read current PWM config to derive physical CCT limits
-            const outputConfigs = setupEp?.getClusterAttributeValue('manuSpecificUbisysDeviceSetup', 'outputConfigurations');
+            // Global device settings
 
-            [1, 5, 6, 7, 8, 9].forEach(epNum => {
-                const ep = device.getEndpoint(epNum);
-                if (ep) {
-                    const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
-                    const colorCapabilities = ep.getClusterAttributeValue('lightingColorCtrl', 'colorCapabilities');
+            exposesList.push(e.enum('output_mode', ea.SET, Object.keys(OUTPUT_CONFIGURATIONS)));
+            exposesList.push(e.text('output_configuration', ea.SET));
+            exposesList.push(e.text('output_configuration_raw', ea.STATE));
+            exposesList.push(e.numeric('ballast_min_level', ea.ALL).withValueMin(1).withValueMax(254));
+            exposesList.push(e.numeric('ballast_max_level', ea.ALL).withValueMin(1).withValueMax(254));
+            // on_off_transition_time moved to per-endpoint loop
+            exposesList.push(e.binary('advanced_options_no_color_white', ea.ALL, true, false));
+            exposesList.push(e.binary('advanced_options_no_first_white_color', ea.ALL, true, false));
+            exposesList.push(e.binary('advanced_options_no_second_white_color', ea.ALL, true, false));
+            exposesList.push(e.binary('advanced_options_ignore_color_temp_range', ea.ALL, true, false));
+            exposesList.push(e.binary('advanced_options_constant_luminous_flux', ea.ALL, true, false));
+            exposesList.push(e.numeric('minimum_on_level', ea.ALL).withValueMin(1).withValueMax(254));
+            exposesList.push(e.list('input_configurations', ea.ALL, e.numeric('value', ea.ALL)));
+            exposesList.push(e.list('input_actions', ea.ALL, e.text('value', ea.ALL)));
+            exposesList.push(e.text('calibration', ea.SET));
+            exposesList.push(e.text('calibration_status', ea.STATE));
 
-                    // 1. Determine capabilities from Output Configuration (if available)
-                    // This is more reliable than waiting for attributes to be read, as we know exactly how we configured the device.
-                    let configHasColorTemp = false;
-                    let configHasColorXY = false;
-                    let cwMireds, wwMireds;
+            /**
+             * Dynamic Feature Probing
+             * The LD6 can be anything from 6 dimmers to 1 RGBWW + 1 CCT. 
+             * We check the actual clusters and attributes on each endpoint to 
+             * decide which controls to show in the UI.
+             */
 
-                    if (outputConfigs) {
-                        outputConfigs.forEach((buf) => {
-                            const el = Buffer.from(buf);
-                            const epFunc = el[0];
-                            const channelEp = (epFunc >> 4) & 0x0F;
-                            const func = epFunc & 0x0F;
-                            if (channelEp === epNum) {
-                                // Determine capabilities based on function
-                                if (func === 1 || func === 2) configHasColorTemp = true; // CW or WW
-                                if (func >= 3 && func <= 9) configHasColorXY = true;     // Color channels
 
-                                // Collect calibration data for range calculation
-                                if (func === 1 || func === 2) {
-                                    const x = (el[2] | (el[3] << 8)) / 65536;
-                                    const y = (el[4] | (el[5] << 8)) / 65536;
-                                    const mireds = xyToMireds(x, y);
-                                    if (func === 1) cwMireds = mireds;
-                                    if (func === 2) wwMireds = mireds;
-                                }
+            if (device && typeof device.getEndpoint === 'function') {
+                const setupEp = device.getEndpoint(232);
+                // Read current PWM config to derive physical CCT limits
+                const outputConfigs = setupEp?.getClusterAttributeValue('manuSpecificUbisysDeviceSetup', 'outputConfigurations');
+
+                [1, 5, 6, 7, 8, 9].forEach(epNum => {
+                    const ep = device.getEndpoint(epNum);
+                    if (ep) {
+                        const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
+                        let colorCapabilities;
+                        try {
+                            if (ep.supportsInputCluster('lightingColorCtrl')) {
+                                colorCapabilities = ep.getClusterAttributeValue('lightingColorCtrl', 'colorCapabilities');
                             }
-                        });
-                    }
+                        } catch (e) { /* ignore */ }
 
-                    // 2. Decide exposed features (Priority: Explicit Capability > Configured Mode > Attribute Presence)
-                    const hasColorTemp = (colorCapabilities !== undefined) ? (colorCapabilities & 0x10) : (configHasColorTemp || (ep.getClusterAttributeValue('lightingColorCtrl', 'colorTemperature') !== undefined));
-                    const hasColorXY = (colorCapabilities !== undefined) ? (colorCapabilities & 0x08) : (configHasColorXY || (ep.getClusterAttributeValue('lightingColorCtrl', 'currentX') !== undefined));
-                    const hasBrightness = ep.supportsInputCluster('genLevelCtrl');
-                    const hasOnOff = ep.supportsInputCluster('genOnOff');
+                        // 1. Determine capabilities from Output Configuration (if available)
+                        // This is more reliable than waiting for attributes to be read, as we know exactly how we configured the device.
+                        let configHasColorTemp = false;
+                        let configHasColorXY = false;
+                        let cwMireds, wwMireds;
 
-                    // 3. Expose provisions
-                    if (hasColorTemp) {
-                        let range = [153, 500]; // Default CCT range
-                        if (cwMireds && wwMireds) {
-                            range = [Math.min(cwMireds, wwMireds), Math.max(cwMireds, wwMireds)];
+                        if (outputConfigs) {
+                            outputConfigs.forEach((buf) => {
+                                const el = Buffer.from(buf);
+                                const epFunc = el[0];
+                                const channelEp = (epFunc >> 4) & 0x0F;
+                                const func = epFunc & 0x0F;
+                                if (channelEp === epNum) {
+                                    // Determine capabilities based on function
+                                    if (func === 1 || func === 2) configHasColorTemp = true; // CW or WW
+                                    if (func >= 3 && func <= 9) configHasColorXY = true;     // Color channels
+
+                                    // Collect calibration data for range calculation
+                                    if (func === 1 || func === 2) {
+                                        const x = (el[2] | (el[3] << 8)) / 65536;
+                                        const y = (el[4] | (el[5] << 8)) / 65536;
+                                        const mireds = xyToMireds(x, y);
+                                        if (func === 1) cwMireds = mireds;
+                                        if (func === 2) wwMireds = mireds;
+                                    }
+                                }
+                            });
                         }
 
-                        if (hasColorXY) {
-                            exposesList.push(e.light_brightness_colortemp_colorxy(range).withEndpoint(name));
-                        } else {
-                            exposesList.push(e.light_brightness_colortemp(range).withEndpoint(name));
-                        }
-                    } else if (hasColorXY) {
-                        exposesList.push(e.light_brightness_colorxy().withEndpoint(name));
-                    } else if (hasBrightness) {
-                        exposesList.push(e.light_brightness().withEndpoint(name));
-                    } else if (hasOnOff) {
-                        exposesList.push(e.light_onoff().withEndpoint(name));
-                    }
+                        // 2. Decide exposed features (Priority: Explicit Capability > Configured Mode > Attribute Presence)
+                        const hasColorTemp = (colorCapabilities !== undefined) ? (colorCapabilities & 0x10) : (configHasColorTemp || (ep.getClusterAttributeValue('lightingColorCtrl', 'colorTemperature') !== undefined));
+                        const hasColorXY = (colorCapabilities !== undefined) ? (colorCapabilities & 0x08) : (configHasColorXY || (ep.getClusterAttributeValue('lightingColorCtrl', 'currentX') !== undefined));
+                        const hasBrightness = ep.supportsInputCluster('genLevelCtrl');
+                        const hasOnOff = ep.supportsInputCluster('genOnOff');
 
-                    // Expose transition time and startup level for this endpoint
+                        // 3. Expose provisions
+                        if (hasColorTemp) {
+                            let range = [153, 500]; // Default CCT range
+                            if (cwMireds && wwMireds) {
+                                range = [Math.min(cwMireds, wwMireds), Math.max(cwMireds, wwMireds)];
+                            }
+
+                            if (hasColorXY) {
+                                exposesList.push(e.light_brightness_colortemp_colorxy(range).withEndpoint(name));
+                            } else {
+                                exposesList.push(e.light_brightness_colortemp(range).withEndpoint(name));
+                            }
+                        } else if (hasColorXY) {
+                            exposesList.push(e.light_brightness_colorxy().withEndpoint(name));
+                        } else if (hasBrightness) {
+                            exposesList.push(e.light_brightness().withEndpoint(name));
+                        } else if (hasOnOff) {
+                            exposesList.push(e.light_onoff().withEndpoint(name));
+                        }
+
+                        // Expose transition time and startup level for this endpoint
+                        exposesList.push(e.numeric('on_off_transition_time', ea.ALL).withUnit('0.1s').withValueMin(0).withValueMax(65535).withEndpoint(name));
+                        exposesList.push(e.numeric('startup_level', ea.ALL).withValueMin(0).withValueMax(254).withEndpoint(name));
+                        exposesList.push(e.binary('execute_if_off', ea.ALL, true, false).withEndpoint(name));
+                    }
+                });
+            } else {
+                // Fallback for when device is not yet fully available (e.g. definition loading)
+                // Expose all 6 endpoints with maximum capabilities to ensure they are available in the UI
+                [1, 5, 6, 7, 8, 9].forEach(epNum => {
+                    const name = epNum === 1 ? 'l1' : `l${epNum === 5 ? 2 : epNum - 3}`;
+                    // Default to most capable light type so user can at least see controls
+                    exposesList.push(e.light_brightness_colortemp_colorxy([153, 555]).withEndpoint(name));
                     exposesList.push(e.numeric('on_off_transition_time', ea.ALL).withUnit('0.1s').withValueMin(0).withValueMax(65535).withEndpoint(name));
                     exposesList.push(e.numeric('startup_level', ea.ALL).withValueMin(0).withValueMax(254).withEndpoint(name));
                     exposesList.push(e.binary('execute_if_off', ea.ALL, true, false).withEndpoint(name));
-                }
-            });
+                });
+            }
+        } catch (err) {
+            console.error('ubisys_ld6: Error in exposes function:', err);
         }
         return exposesList;
     },
@@ -524,8 +554,8 @@ const definition = {
                     if (ep.supportsInputCluster('lightingColorCtrl')) {
                         await ep.read('lightingColorCtrl', ['colorCapabilities', 'colorTemperature', 'colorTempPhysicalMinMireds', 'colorTempPhysicalMaxMireds']);
                     }
-                    if (ep.supportsInputCluster('ballastCfg')) {
-                        await ep.read('ballastCfg', ['physicalMinLevel', 'physicalMaxLevel']);
+                    if (ep.supportsInputCluster('lightingBallastCfg')) {
+                        await ep.read('lightingBallastCfg', ['physicalMinLevel', 'physicalMaxLevel']);
                     }
                     await ep.read('genLevelCtrl', ['startUpCurrentLevel', 'options']);
                 } catch (e) { console.warn(`ubisys LD6: Failed to configure endpoint ${epNum}: ${e.message}`); }
