@@ -1,6 +1,15 @@
-# ubisys LD6 Zigbee2MQTT External Converter
+# ubisys Zigbee2MQTT External Converters
 
-This was vibecoded with Antigravity. It works for me (I only use the CCT mode though), YMMV. :) 
+This was vibecoded with Antigravity. It works for me, YMMV. :) 
+
+This repository contains external converters for ubisys Zigbee devices:
+
+- **ubisys LD6** - Zigbee/Bluetooth LED Controller with 6 configurable outputs
+- **ubisys J1/J1-R** - Zigbee shutter control with integrated smart meter
+
+---
+
+# ubisys LD6
 
 This external converter provides support for the **ubisys LD6** Zigbee/Bluetooth LED Controller with 6 configurable outputs.
 
@@ -256,3 +265,265 @@ The predefined CIE xy coordinates are defaults from the ubisys documentation. Fo
 ## License
 
 This converter is provided as-is for the community. Contributions welcome!
+
+---
+
+# ubisys J1/J1-R
+
+This external converter provides support for the **ubisys J1/J1-R** ZigBee shutter control with integrated smart meter.
+
+## Features
+
+- **Window covering control** - Position, tilt, open/close/stop
+- **Smart metering** - Power (W), energy (kWh)
+- **Electrical measurements** - Voltage, current, frequency, power factor
+- **Advanced calibration** - Configure motor timing and limits
+- **Input configuration** - Customize switch behavior (momentary/stationary)
+- **Motor reversal** - Reverse motor direction if needed
+- OTA firmware updates
+
+## Installation
+
+1. Copy `ubisys_j1.mjs` to your Zigbee2MQTT external converters folder:
+   ```
+   <zigbee2mqtt_data>/external_converters/ubisys_j1.mjs
+   ```
+
+2. Restart Zigbee2MQTT
+
+3. Pair the J1 device (or if already paired, it should be recognized automatically)
+
+## Window Covering Control
+
+### Basic Commands
+
+```bash
+# Open the shutter
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{"state": "OPEN"}'
+
+# Close the shutter
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{"state": "CLOSE"}'
+
+# Stop movement
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{"state": "STOP"}'
+
+# Go to specific position (0 = closed, 100 = open)
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{"position": 50}'
+
+# Go to specific tilt angle (0 = closed, 100 = open)
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{"tilt": 45}'
+```
+
+## Calibration
+
+The J1 must be calibrated after installation for advanced positioning features (go to percentage) to work properly.
+
+### Automatic Calibration
+
+```bash
+# Start calibration for a lift & tilt blind (type 8)
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{
+  "configure_j1": {
+    "calibrate": 1,
+    "windowCoveringType": 8
+  }
+}'
+```
+
+**Calibration Procedure:**
+1. Device enters calibration mode
+2. Move the blind **down** a bit manually, then **up** to the top
+3. Wait for motor to stop
+4. Move **down** to the bottom
+5. Wait for motor to stop
+6. Move **up** to the top again
+7. Calibration is complete when the device detects the total steps
+
+### Setting Tilt Transition Time
+
+Tilt transition cannot be auto-calibrated - measure it manually:
+
+```bash
+# Set tilt transition time (in milliseconds)
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{
+  "configure_j1": {
+    "lift_to_tilt_transition_ms": 1600
+  }
+}'
+```
+
+### Exit Calibration Mode
+
+```bash
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{
+  "configure_j1": {
+    "calibrate": 0
+  }
+}'
+```
+
+## Window Covering Types
+
+| Value | Type | Capabilities |
+|-------|------|--------------|
+| 0 | Roller Shade | Lift only |
+| 1 | Roller Shade (2 motors) | Lift only |
+| 2 | Roller Shade (exterior) | Lift only |
+| 3 | Roller Shade (2 motors, exterior) | Lift only |
+| 4 | Drapery | Lift only |
+| 5 | Awning | Lift only |
+| 6 | Shutter | Tilt only |
+| 7 | Tilt Blind (tilt only) | Tilt only |
+| 8 | Tilt Blind (lift & tilt) | Lift & Tilt |
+| 9 | Projector Screen | Lift only |
+
+## Configuration Parameters
+
+All parameters can be set via the `configure_j1` composite:
+
+```json
+{
+  "configure_j1": {
+    "windowCoveringType": 8,
+    "configStatus": 24,
+    "installedOpenLimitLiftCm": 0,
+    "installedClosedLimitLiftCm": 240,
+    "installedOpenLimitTiltDdegree": 0,
+    "installedClosedLimitTiltDdegree": 900,
+    "turnaroundGuardTime": 10,
+    "totalSteps": 5000,
+    "totalSteps2": 5200,
+    "liftToTiltTransitionSteps": 80,
+    "additionalSteps": 10,
+    "inactivePowerThreshold": 4096,
+    "startupSteps": 32
+  }
+}
+```
+
+### Convenience Parameters
+
+Instead of calculating steps manually:
+
+```json
+{
+  "configure_j1": {
+    "open_to_closed_s": 25,
+    "closed_to_open_s": 26,
+    "lift_to_tilt_transition_ms": 1600,
+    "steps_per_second": 50
+  }
+}
+```
+
+## Input Configuration
+
+The J1 has 2 high-voltage inputs for local control.
+
+### Input Configuration Flags
+
+| Value | Description |
+|-------|-------------|
+| `0x00` (0) | Enabled, active-high (normally open) |
+| `0x40` (64) | Enabled, inverted (normally closed) |
+| `0x80` (128) | Disabled |
+
+```bash
+# Set both inputs to normally closed switches
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{"input_configurations": [64, 64]}'
+```
+
+### Input Actions
+
+For momentary push-buttons (default):
+- Short press = move up/down, release = stop
+- Long press = move to limit without stopping
+
+For stationary switches:
+- Configure with appropriate action codes (see technical reference)
+
+## Electronic Motor Support
+
+For motors with electronic end-stop detection:
+
+```json
+{
+  "configure_j1": {
+    "inactivePowerThreshold": 4096,
+    "startupSteps": 32
+  }
+}
+```
+
+- **inactivePowerThreshold** (mW): Power level below which motor is considered "off". Default 4096 (~4.1W) works for most motors.
+- **startupSteps**: Number of AC cycles to wait before checking power threshold.
+
+## Metering
+
+The J1 includes a smart meter. Read values with:
+
+```bash
+# Get current power consumption
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/get' -m '{"power": ""}'
+
+# Get total energy consumed
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/get' -m '{"energy": ""}'
+
+# Get voltage, current, frequency
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/get' -m '{"voltage": ""}'
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/get' -m '{"current": ""}'
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/get' -m '{"ac_frequency": ""}'
+```
+
+## Exposed Entities
+
+| Entity | Access | Description |
+|--------|--------|-------------|
+| `cover` | Read/Write | Cover position and tilt control |
+| `power` | Read | Current power consumption (W) |
+| `energy` | Read | Total energy consumed (kWh) |
+| `voltage` | Read | Line voltage (V) |
+| `current` | Read | Line current (A) |
+| `ac_frequency` | Read | Line frequency (Hz) |
+| `active_power` | Read | Active power (W) |
+| `reactive_power` | Read | Reactive power (VAr) |
+| `apparent_power` | Read | Apparent power (VA) |
+| `power_factor` | Read | Power factor |
+| `moving` | Read | Whether motor is currently running |
+| `movement` | Read | Current direction (stopped/opening/closing) |
+| `motor_reversed` | Read/Write | Reverse motor direction |
+| `calibration_mode` | Read | Device in calibration mode |
+| `window_covering_type` | Read | Current window covering type |
+| `turnaround_guard_time` | Read | Guard time between direction changes (ms) |
+| `lift_to_tilt_transition_steps` | Read | Steps for lift-to-tilt transition |
+| `total_steps` | Read | Total steps open→closed |
+| `total_steps_2` | Read | Total steps closed→open |
+| `input_configurations` | Read/Write | Input enable/invert settings |
+| `input_actions` | Read/Write | Input action mappings (hex) |
+| `configure_j1` | Write | Configuration composite |
+
+## Troubleshooting
+
+### Position not reporting correctly
+
+After a power cycle, the J1 must reach the top or bottom limit once to regain position awareness. Move down slightly, then move up to the top.
+
+### Calibration not working
+
+1. Ensure the motor is properly connected
+2. Check `inactivePowerThreshold` if using an electronic motor
+3. Try disabling closed-loop control: set `configStatus` to clear bits 3 and 4
+
+### Motor running in wrong direction
+
+Set `motor_reversed` to true:
+
+```bash
+mosquitto_pub -t 'zigbee2mqtt/YOUR_J1_NAME/set' -m '{"motor_reversed": true}'
+```
+
+## References
+
+- [ubisys J1 Technical Reference](https://www.ubisys.de/en/support/technical-documentation/)
+- [Zigbee2MQTT External Converters](https://www.zigbee2mqtt.io/advanced/more/external_converters.html)
+
